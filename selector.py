@@ -13,6 +13,8 @@ IMPORT_LINES = {}
 # Imports SQLGlot in a child process, which coverage does not follow.
 EAGER = set()
 TEST_IMPORTS = {}
+# Tests that created an instance of each class (or a subclass), by line range.
+CLASS_USERS = {}
 IMPORT_TESTS = {"tests/dialects/test_dialect.py::TestDialect::test_lazy_load"}
 HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
 
@@ -180,6 +182,12 @@ def select(patch, fixture_map, source_map, tests, mode):
                     # importer, so take every test that used the file.
                     indices.update(groups[mapping["file"]])
                     chosen.update(IMPORT_TESTS if path in EAGER else ())
+                    # A class body (TRANSFORMS, KEYWORDS, flags) is read by
+                    # every test that used the class, even one that never ran
+                    # a function in this file.
+                    for start, stop, users in CLASS_USERS.get(path, ()):
+                        if start <= line <= stop:
+                            chosen.update(users)
                     continue
                 if line < function[1]:
                     # Signature or decorator: it affects every caller.
@@ -231,6 +239,11 @@ def main():
     IMPORT_LINES.update((path, set(lines)) for path, lines in imports["lines"].items())
     EAGER.update(imports["eager"])
     TEST_IMPORTS.update(json.loads(Path(__file__).with_name("test-imports.json").read_text(encoding="utf-8")))
+    classes = json.loads(Path(__file__).with_name("class-map.json").read_text(encoding="utf-8"))
+    CLASS_USERS.update(
+        (path, [(start, stop, {classes["ids"][number] for number in users}) for start, stop, users in ranges])
+        for path, ranges in classes["files"].items()
+    )
     full = schedule(tests)
     for patch in sorted((args.data / "commits").glob("*.patch")):
         selected = select(patch.read_text(encoding="utf-8"), fixture_map, source_map, tests, args.mode)

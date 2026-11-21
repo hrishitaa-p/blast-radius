@@ -54,3 +54,14 @@ rm -rf pinned && mkdir pinned && git -C /path/to/sqlglot archive HEAD sqlglot | 
 ```
 
 The map-building commands use only the pinned SQLGlot source and its tests.
+
+## Class usage
+
+Edits to class bodies (`TRANSFORMS`, `FUNCTIONS`, `KEYWORDS`, flags) also
+select every test that created an instance of that class or a subclass, since
+such a test may never run a function in the edited file. Rebuild with:
+
+```sh
+python3 class_usage.py /path/to/sqlglot class-usage.json   # runs the suite once
+python3 class_map.py /path/to/sqlglot class-usage.json class-map.json
+```
