@@ -8,6 +8,11 @@ import sys
 
 MAX_WORKERS = 8
 WORKER_COST_MS = 2_000
+PINNED = Path(__file__).with_name("pinned")
+IMPORT_LINES = {}
+# Imports SQLGlot in a child process, which coverage does not follow.
+EAGER = set()
+IMPORT_TESTS = {"tests/dialects/test_dialect.py::TestDialect::test_lazy_load"}
 HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
 
 
@@ -54,6 +59,61 @@ def changed_lines(body):
     return lines
 
 
+def patched_source(original, body):
+    """Apply one file's hunks to the pinned source, or None if they do not fit."""
+    old = original.split("\n")
+    out = []
+    cursor = 0
+    lines = body.split("\n")
+    index = 0
+    while index < len(lines):
+        match = HUNK.match(lines[index])
+        index += 1
+        if not match:
+            if lines[index - 1].strip():
+                return None
+            continue
+        start = int(match[1]) - 1 if int(match[1]) > 0 else 0
+        if start < cursor:
+            return None
+        out.extend(old[cursor:start])
+        cursor = start
+        while index < len(lines) and not lines[index].startswith("@@ "):
+            line = lines[index]
+            index += 1
+            if line.startswith("\\"):
+                continue
+            if line.startswith("+"):
+                out.append(line[1:])
+            elif line.startswith((" ", "-")) or line == "":
+                if line == "" and (index == len(lines) or cursor >= len(old)):
+                    continue
+                if cursor >= len(old) or old[cursor] != line[1:]:
+                    return None
+                if not line.startswith("-"):
+                    out.append(old[cursor])
+                cursor += 1
+            else:
+                return None
+    out.extend(old[cursor:])
+    return "\n".join(out)
+
+
+def compiles(path, body):
+    """False when the patched module would fail to import with a syntax error."""
+    source = PINNED / path
+    if not source.is_file():
+        return False
+    patched = patched_source(source.read_text(encoding="utf-8"), body)
+    if patched is None:
+        return False
+    try:
+        compile(patched, path, "exec", dont_inherit=True)
+    except (SyntaxError, ValueError):
+        return False
+    return True
+
+
 def select(patch, fixture_map, source_map, tests, mode):
     blocks = re.split(r"(?m)(?=^diff --git )", patch)
     chosen = set()
@@ -79,6 +139,9 @@ def select(patch, fixture_map, source_map, tests, mode):
         indices = set()
         groups = source_map["groups"]
         body = sep[1:] + rest
+        if not compiles(path, body):
+            # A syntax error fails every test whose file imports this module.
+            return tests
         touched = changed_lines(body)
         additions = [line[1:] for line in body.split("\n") if line.startswith("+")]
         removed = any(line.startswith("-") for line in body.split("\n"))
@@ -96,8 +159,28 @@ def select(patch, fixture_map, source_map, tests, mode):
         for start, stop, key in mapping.get("attributes", ()):
             if any(start <= line <= stop for line in touched):
                 indices.update(groups[key])
+        import_time = IMPORT_LINES.get(path, set())
         if mode == "line":
             for line in touched:
+                function = next(
+                    (span for span in mapping.get("functions", ()) if span[0] <= line <= span[2]),
+                    None,
+                )
+                if function is None:
+                    # Import-time code: its line coverage names only the first
+                    # importer, so take every test that used the file.
+                    indices.update(groups[mapping["file"]])
+                    chosen.update(IMPORT_TESTS if path in EAGER else ())
+                    continue
+                if line < function[1]:
+                    # Signature or decorator: it affects every caller.
+                    indices.update(groups[function[3] if function[3] is not None else mapping["file"]])
+                    chosen.update(IMPORT_TESTS if path in EAGER else ())
+                    continue
+                if line in import_time:
+                    # A function body that runs while some module loads.
+                    indices.update(groups[mapping["file"]])
+                    chosen.update(IMPORT_TESTS if path in EAGER else ())
                 direct = mapping["lines"].get(str(line))
                 if direct is not None:
                     indices.update(groups[direct])
@@ -135,6 +218,9 @@ def main():
     tests = json.loads((args.data / "tests.json").read_text(encoding="utf-8"))["tests"]
     fixture_map = json.loads(args.fixture_map.read_text(encoding="utf-8"))
     source_map = json.loads(args.source_map.read_text(encoding="utf-8"))
+    imports = json.loads(Path(__file__).with_name("import-lines.json").read_text(encoding="utf-8"))
+    IMPORT_LINES.update((path, set(lines)) for path, lines in imports["lines"].items())
+    EAGER.update(imports["eager"])
     full = schedule(tests)
     for patch in sorted((args.data / "commits").glob("*.patch")):
         selected = select(patch.read_text(encoding="utf-8"), fixture_map, source_map, tests, args.mode)

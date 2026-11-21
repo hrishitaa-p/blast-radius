@@ -3,3 +3,6 @@
 !selector.py
 !fixtures-map.json
 !coverage-map.json
+!import-lines.json
+!pinned
+!pinned/**

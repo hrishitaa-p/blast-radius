@@ -8,7 +8,12 @@ fallback for unrecognized patches.
 
 Selections use changed-line coverage, widening to every test that ran the
 enclosing multi-line statement (so short-circuited operands are not missed) and
-to file coverage for recursive functions. Edits to
+to file coverage for recursive functions. Lines that run while a module is
+imported, plus function signatures and decorators, are credited by coverage
+only to whichever test imported first, so they widen to every test that used
+the file (or that ran the function). Each patched file is applied to a pinned
+copy of the SQLGlot source in `pinned/` and compiled; a syntax error runs the
+full suite. Edits to
 simple constants also include measured attribute readers. Plain comment
 insertions outside multiline tokens include tests that inspect source text.
 For each selection, the scheduler tries one through eight workers and minimizes
@@ -16,7 +21,7 @@ the largest recorded load plus two seconds per worker.
 
 ## Local verification
 
-On the 30 official samples this configuration scored 178.156 simulated seconds
+On the 30 official samples this configuration scored 183.643 simulated seconds
 with zero misses before CPU time. This is a local score. The practice and final
 datasets are scored by the organizers.
 
@@ -42,6 +47,8 @@ python3 build_coverage.py /path/to/sqlglot baseline.json
 python3 build_coverage.py /path/to/sqlglot workers.json --worker-tests
 python3 fixture_usage.py /path/to/sqlglot fixtures-map.json
 python3 compile_map.py /path/to/sqlglot baseline.json coverage-map.json --worker-coverage workers.json
+python3 import_lines.py /path/to/sqlglot import-lines.json
+rm -rf pinned && mkdir pinned && git -C /path/to/sqlglot archive HEAD sqlglot | tar -x -C pinned
 ```
 
 The map-building commands use only the pinned SQLGlot source and its tests.

@@ -22,6 +22,18 @@ def scope_ranges(path):
     )
 
 
+def function_ranges(tree):
+    """(first line, first body line, last line) of every function, innermost first."""
+    return sorted(
+        (
+            (min([node.lineno, *(item.lineno for item in node.decorator_list)]), node.body[0].lineno, node.end_lineno)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ),
+        key=lambda span: (span[2] - span[0], span),
+    )
+
+
 def statement_ranges(tree):
     """Line spans of multi-line simple statements and compound-statement headers.
 
@@ -121,6 +133,12 @@ def main():
             "file": group(mapping["file"]),
             "lines": {line: group(names) for line, names in line_hits.items()},
             "scopes": scopes,
+            # Module and class bodies, signatures and decorators run at import,
+            # which coverage credits only to whichever test imported first.
+            "functions": [
+                [start, body, stop, next((key for s, e, key in scopes if (s, e) == (start, stop)), None)]
+                for start, body, stop in function_ranges(tree)
+            ],
             "recursive": recursive,
             "multiline": multiline,
             "statements": [
