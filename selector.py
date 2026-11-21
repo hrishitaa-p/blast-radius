@@ -96,18 +96,20 @@ def select(patch, fixture_map, source_map, tests, mode):
         for start, stop, key in mapping.get("attributes", ()):
             if any(start <= line <= stop for line in touched):
                 indices.update(groups[key])
-        boolean_lines = [
-            line[1:] for line in body.split("\n") if line.startswith(("+", "-"))
-        ]
-        scope_required = mode == "scope" or (
-            mode == "line" and any(re.search(r"\b(?:and|or|not)\b", line) for line in boolean_lines)
-        )
-        if mode == "line" and not scope_required:
+        if mode == "line":
             for line in touched:
                 direct = mapping["lines"].get(str(line))
                 if direct is not None:
                     indices.update(groups[direct])
-        if scope_required or (mode == "line" and not indices):
+                # A short-circuited operand on its own line has no coverage of
+                # its own, so take every test that ran the whole statement.
+                statement = next(
+                    (key for start, stop, key in mapping.get("statements", ()) if start <= line <= stop),
+                    None,
+                )
+                if statement is not None:
+                    indices.update(groups[statement])
+        if mode == "scope" or (mode == "line" and not indices):
             for line in touched:
                 scope = next((key for start, stop, key in mapping["scopes"] if start <= line <= stop), None)
                 if scope is not None:

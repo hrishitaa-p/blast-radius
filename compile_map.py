@@ -22,6 +22,36 @@ def scope_ranges(path):
     )
 
 
+def statement_ranges(tree):
+    """Line spans of multi-line simple statements and compound-statement headers.
+
+    Coverage credits a multi-line expression only to the lines it evaluates, so
+    a short-circuited operand leaves its own line uncovered. Any test that runs
+    the statement may still run an edited operand.
+    """
+    spans = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.If, ast.While)):
+            parts = [node.test]
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            parts = [node.target, node.iter]
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            parts = [item.context_expr for item in node.items]
+        elif isinstance(node, ast.Match):
+            parts = [node.subject]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Try)):
+            continue
+        elif isinstance(node, ast.stmt):
+            parts = [node]
+        else:
+            continue
+        start = min([node.lineno, *(part.lineno for part in parts)])
+        stop = max(part.end_lineno for part in parts)
+        if start < stop:
+            spans.append([start, stop])
+    return sorted(spans, key=lambda span: (span[1] - span[0], span))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path)
@@ -93,6 +123,13 @@ def main():
             "scopes": scopes,
             "recursive": recursive,
             "multiline": multiline,
+            "statements": [
+                [start, stop, group(names)]
+                for start, stop in statement_ranges(tree)
+                if (names := {
+                    name for line in range(start, stop + 1) for name in line_hits.get(line, ())
+                })
+            ],
             "attributes": [
                 [start, stop, group(references[name])]
                 for start, stop, name in definitions[path] if references[name]

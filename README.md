@@ -6,8 +6,9 @@ instrumented run of the optimizer and executor tests that normally use child
 processes. It also maps fixture readers and uses a conservative full-suite
 fallback for unrecognized patches.
 
-Selections use changed-line coverage, widening to enclosing function coverage
-for boolean expressions and to file coverage for recursive functions. Edits to
+Selections use changed-line coverage, widening to every test that ran the
+enclosing multi-line statement (so short-circuited operands are not missed) and
+to file coverage for recursive functions. Edits to
 simple constants also include measured attribute readers. Plain comment
 insertions outside multiline tokens include tests that inspect source text.
 For each selection, the scheduler tries one through eight workers and minimizes
@@ -15,7 +16,7 @@ the largest recorded load plus two seconds per worker.
 
 ## Local verification
 
-On the 30 official samples this configuration scored 184.695 simulated seconds
+On the 30 official samples this configuration scored 178.156 simulated seconds
 with zero misses before CPU time. This is a local score. The practice and final
 datasets are scored by the organizers.
 
