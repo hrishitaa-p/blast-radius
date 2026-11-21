@@ -8,7 +8,6 @@ import sys
 
 MAX_WORKERS = 8
 WORKER_COST_MS = 2_000
-HEAD = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 
 
 def schedule(tests):
@@ -28,70 +27,47 @@ def schedule(tests):
     return best
 
 
-def changes(patch):
-    """Yield original source paths and line numbers touched by a unified diff."""
-    current = None
-    old_line = None
-    for line in patch.splitlines():
-        if line.startswith("diff --git "):
-            current = None
-            old_line = None
-        elif old_line is not None:
-            prefix = line[:1]
-            if prefix == "-":
-                yield current, old_line
-                old_line += 1
-            elif prefix == "+":
-                yield current, old_line
-                if old_line > 1:
-                    yield current, old_line - 1
-            elif prefix == " ":
-                old_line += 1
-            elif not line.startswith("\\"):
-                old_line = None
-                if line.startswith("@@"):
-                    match = HEAD.match(line)
-                    if match:
-                        old_line = int(match[1])
-        elif line.startswith("--- "):
-            original = line[4:].split("\t", 1)[0]
-            current = original[2:] if original.startswith("a/") else None
-        elif line.startswith("@@"):
-            match = HEAD.match(line)
-            if match:
-                old_line = int(match[1])
-
-
-def select(patch, maps, tests):
-    # An unmapped file or unsupported diff gets the complete suite.
-    files = {}
-    for path, line in changes(patch):
-        if path not in maps:
-            return tests
-        files.setdefault(path, set()).add(str(line))
-    if not files:
-        return tests
+def select(patch, fixture_map, tests):
+    """Use measured readers only for edits to existing, unchanged fixture paths."""
+    blocks = re.split(r"(?m)(?=^diff --git )", patch)
     chosen = set()
-    for path, lines in files.items():
-        mapping = maps[path]
-        hits = {test for line in lines for test in mapping["lines"].get(line, ())}
-        chosen.update(hits or mapping["file"])
-    return [test for test in tests if test["id"] in chosen] if chosen else tests
+    for block in blocks:
+        if not block.strip():
+            continue
+        header, separator, _ = block.partition("\n@@ ")
+        if not separator or not header.startswith("diff --git "):
+            return tests
+        lines = header.splitlines()
+        if len(lines) != 4 or not lines[1].startswith("index "):
+            return tests
+        old, new = lines[2:]
+        if not old.startswith("--- a/") or new != "+++ b/" + old[6:]:
+            return tests
+        readers = fixture_map.get(old[6:])
+        if not readers:
+            return tests
+        chosen.update(readers)
+    if not chosen:
+        return tests
+    selected = [test for test in tests if test["id"] in chosen]
+    return selected if len(selected) == len(chosen) else tests
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("/data"))
-    parser.add_argument("--coverage-map", type=Path)
+    parser.add_argument(
+        "--fixture-map", type=Path, default=Path(__file__).with_name("fixtures-map.json")
+    )
     args = parser.parse_args()
-    tests = json.loads((args.data / "tests.json").read_text())["tests"]
-    maps = json.loads(args.coverage_map.read_text()) if args.coverage_map else {}
+    tests = json.loads((args.data / "tests.json").read_text(encoding="utf-8"))["tests"]
+    fixture_map = json.loads(args.fixture_map.read_text(encoding="utf-8"))
     full = schedule(tests)
     for patch in sorted((args.data / "commits").glob("*.patch")):
-        selected = select(patch.read_text(encoding="utf-8"), maps, tests) if maps else tests
+        selected = select(patch.read_text(encoding="utf-8"), fixture_map, tests)
         workers = full if selected is tests else schedule(selected)
         print(json.dumps({"commit": patch.stem, "workers": workers}, separators=(",", ":")))
-    print("Coverage map enabled" if maps else "All-tests scheduling baseline", file=sys.stderr)
+    print("Scheduled fixture readers or the full suite for every patch", file=sys.stderr)
 
 
 if __name__ == "__main__":

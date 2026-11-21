@@ -1,40 +1,38 @@
 # Blast Radius
 
-RWX Builders Buildathon entry for selecting and scheduling SQLGlot regression
-tests. The default selector runs the full suite and chooses the cheapest
-schedule it finds across one to eight workers. It computes costs in milliseconds
-with the official two-second charge per worker.
+RWX Builders Buildathon submission for selecting and scheduling SQLGlot tests.
+Edits confined to mapped fixtures run the tests that read those fixtures on the
+official pinned revision. All other patches run the entire test inventory. For
+each selection the scheduler tries one through eight workers and minimizes the
+largest recorded worker load plus two seconds per worker.
 
-Run under the official container constraints with `make sample`. Docker must
-support linux/amd64. To score the same output locally without Docker:
+## Verification
+
+The 30 official samples scored 827.874 simulated seconds with zero misses. The
+official starter scored 1210.470 seconds with zero misses on the same samples.
+These timings exclude the selector's CPU usage. An exploratory source-coverage
+selector missed failures on the samples, so source changes use the full suite.
+
+Extract the official starter's sample directory beside this README, then run
+`make sample` with Docker and linux/amd64 support. To score directly with Python:
 
 ```sh
 python3 selector.py --data sample > output.jsonl
 python3 score.py sample sample/answers.json output.jsonl
 ```
 
-The experimental `--coverage-map` option accepts line and file coverage from
-the pinned, unmodified SQLGlot revision, keyed by source path and pytest node ID.
-Keep it disabled until a generated map has been evaluated. Sample answers are
-used exclusively by the local scorer and are excluded from the image.
+The sample inputs and answers are outside the image. The image uses the pinned
+base from the official starter and requires no runtime network access.
 
-## Local baseline
+## Rebuild the fixture map
 
-Against the 30 official samples, the starter scored 1210.470 simulated seconds
-with zero misses. The scheduler here scored 1104.510 simulated seconds with zero
-misses. Those comparisons exclude CPU time.
-
-Extract the official starter's `sample/` directory alongside this README to
-repeat the benchmark. To generate an experimental coverage map, install
-coverage.py and the pinned checkout's test dependencies in a separate
-environment, then run:
+Check out SQLGlot at `eb11aec4be8cb2122afe713a4816662c3f0fb2fa`. Install its
+test dependencies plus pytest and coverage.py in an isolated environment, then
+run:
 
 ```sh
-python3 build_coverage.py /path/to/pinned/sqlglot coverage-map.json
-python3 selector.py --data sample --coverage-map coverage-map.json > output.jsonl
-python3 score.py sample sample/answers.json output.jsonl
+python3 fixture_usage.py /path/to/pinned/sqlglot fixtures-map.json
 ```
 
-The baseline image runs with the original pinned Linux image, requires no
-network at runtime, and writes the score protocol to stdout. The tournament
-requires a public GitHub repository under 20 MB with a root Dockerfile.
+The map records file reads during baseline tests. Neither map generation nor
+the selector reads sample answers.

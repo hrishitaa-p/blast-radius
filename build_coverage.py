@@ -26,6 +26,15 @@ class TestContexts:
             self.collector.switch_context("")
 
 
+def verify_checkout(checkout):
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
+    if revision != REVISION or subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=checkout
+    ):
+        raise SystemExit("Use a clean checkout of the official pinned revision")
+
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path)
@@ -33,11 +42,7 @@ def main():
     args = parser.parse_args()
     checkout = args.checkout.resolve()
     output = args.output.resolve()
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
-    if revision != REVISION or subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=checkout
-    ):
-        parser.error("Use a clean checkout of the official pinned revision")
+    verify_checkout(checkout)
 
     os.chdir(checkout)
     sys.path.insert(0, str(checkout))
