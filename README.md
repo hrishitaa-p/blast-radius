@@ -13,7 +13,8 @@ imported, plus function signatures and decorators, are credited by coverage
 only to whichever test imported first, so they widen to every test that used
 the file (or that ran the function). Each patched file is applied to a pinned
 copy of the SQLGlot source in `pinned/` and compiled; a syntax error runs the
-full suite. Edits to
+full suite. An edit to a test file selects the tests in that file and in the
+test files that import it. Edits to
 simple constants also include measured attribute readers. Plain comment
 insertions outside multiline tokens include tests that inspect source text.
 For each selection, the scheduler tries one through eight workers and minimizes
@@ -48,6 +49,7 @@ python3 build_coverage.py /path/to/sqlglot workers.json --worker-tests
 python3 fixture_usage.py /path/to/sqlglot fixtures-map.json
 python3 compile_map.py /path/to/sqlglot baseline.json coverage-map.json --worker-coverage workers.json
 python3 import_lines.py /path/to/sqlglot import-lines.json
+python3 test_imports.py /path/to/sqlglot test-imports.json
 rm -rf pinned && mkdir pinned && git -C /path/to/sqlglot archive HEAD sqlglot | tar -x -C pinned
 ```
 

@@ -12,6 +12,7 @@ PINNED = Path(__file__).with_name("pinned")
 IMPORT_LINES = {}
 # Imports SQLGlot in a child process, which coverage does not follow.
 EAGER = set()
+TEST_IMPORTS = {}
 IMPORT_TESTS = {"tests/dialects/test_dialect.py::TestDialect::test_lazy_load"}
 HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
 
@@ -133,6 +134,14 @@ def select(patch, fixture_map, source_map, tests, mode):
         if path in fixture_map:
             chosen.update(fixture_map[path])
             continue
+        if path.startswith("tests/") and path.endswith(".py"):
+            # A test-tree edit can only fail tests in that file or in test files
+            # importing it. Package initializers load for every test below them.
+            importers = TEST_IMPORTS.get(path)
+            if importers is None or path.endswith("/__init__.py"):
+                return tests
+            chosen.update(test["id"] for test in tests if test["file"] in importers)
+            continue
         mapping = source_map["files"].get(path)
         if mapping is None:
             return tests
@@ -221,6 +230,7 @@ def main():
     imports = json.loads(Path(__file__).with_name("import-lines.json").read_text(encoding="utf-8"))
     IMPORT_LINES.update((path, set(lines)) for path, lines in imports["lines"].items())
     EAGER.update(imports["eager"])
+    TEST_IMPORTS.update(json.loads(Path(__file__).with_name("test-imports.json").read_text(encoding="utf-8")))
     full = schedule(tests)
     for patch in sorted((args.data / "commits").glob("*.patch")):
         selected = select(patch.read_text(encoding="utf-8"), fixture_map, source_map, tests, args.mode)

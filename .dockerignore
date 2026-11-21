@@ -4,5 +4,6 @@
 !fixtures-map.json
 !coverage-map.json
 !import-lines.json
+!test-imports.json
 !pinned
 !pinned/**
