@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 import coverage
 import pytest
@@ -34,11 +36,11 @@ def verify_checkout(checkout):
         raise SystemExit("Use a clean checkout of the official pinned revision")
 
 
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--worker-tests", action="store_true")
     args = parser.parse_args()
     checkout = args.checkout.resolve()
     output = args.output.resolve()
@@ -47,11 +49,26 @@ def main():
     os.chdir(checkout)
     sys.path.insert(0, str(checkout))
     collector = coverage.Coverage(source=["sqlglot"], config_file=False, data_file=None)
-    with collector.collect():
-        status = pytest.main(
-            ["-q", "tests", "--deselect=tests/dialects/test_sqlite.py::TestSQLite::test_variadic_iif_execution"],
-            plugins=[TestContexts(collector)],
-        )
+    if args.worker_tests:
+        # Keep each test's pool work visible to coverage. This is an offline
+        # instrumentation run, separate from the tests' normal process pool.
+        def instrumented_pool(**kwargs):
+            return ThreadPoolExecutor(
+                max_workers=1, initializer=kwargs.get("initializer"),
+                initargs=kwargs.get("initargs", ()),
+            )
+
+        with collector.collect(), patch("concurrent.futures.ProcessPoolExecutor", instrumented_pool):
+            status = pytest.main(
+                ["-q", "tests/test_optimizer.py", "tests/test_executor.py"],
+                plugins=[TestContexts(collector)],
+            )
+    else:
+        with collector.collect():
+            status = pytest.main(
+                ["-q", "tests", "--deselect=tests/dialects/test_sqlite.py::TestSQLite::test_variadic_iif_execution"],
+                plugins=[TestContexts(collector)],
+            )
     if status != pytest.ExitCode.OK:
         raise SystemExit("Coverage requires a passing baseline suite")
 
